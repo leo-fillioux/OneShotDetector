@@ -6,6 +6,7 @@ import nmslib
 from tqdm import tqdm
 from glob import glob
 import os
+import json
 
 """ Local """
 import constants
@@ -15,7 +16,7 @@ import utils
 
 class Classifier(object):
     def __init__(self, catalog_images_paths, params={}):
-        self.catalog_images_paths = catalog_images_paths
+        self.catalog_images_paths = sorted(catalog_images_paths)
         self.get_params(params)
         self.config_matcher()
     
@@ -78,7 +79,8 @@ class Classifier(object):
 
         results = {}
         for query_path in iterator:
-            results[query_path] = self.predict_query(query_path, score_threshold=score_threshold)
+            query_id = query_path.split("/")[-1]
+            results[query_id] = self.predict_query(query_path, score_threshold=score_threshold)
         
         return results
 
@@ -91,14 +93,34 @@ class Classifier(object):
         for ind, nn_trainIdx in enumerate(trainIdx):
             for k, idx in enumerate(nn_trainIdx):
                 catalog_path = self.catalog_images_paths[idx // query_descriptors.shape[0]]
-                scores[catalog_path] = scores.get(catalog_path, 0) + scores_matrix[ind, k]
+                catalog_label = catalog_path.split("/")[-1][:-4]
+                scores[catalog_label] = scores.get(catalog_label, 0) + scores_matrix[ind, k]
         return scores
 
+    def get_best_threshold(self, query_paths, ground_truth_path):
+        with open(ground_truth_path, "r") as f: ground_truth = json.load(f)
+        accuracies = []
+        threshold_values = range(0, 5000)
+        predictions = self.predict_query_batch(query_paths)
+        for threshold in threshold_values:
+            accuracies.append(self.compute_accuracy(ground_truth, predictions, threshold=threshold))
+        return threshold_values[np.argmax(accuracies)], np.max(accuracies) * 100
 
+    def compute_accuracy(self, ground_truth, predictions, threshold=None):
+        nb_correct = counter = 0
+        for img_id in ground_truth:
+            if img_id in predictions:
+                predicted_label, predicted_score = predictions[img_id]
+                if threshold is not None and predicted_score < threshold: predicted_label = constants.BACKGROUND_LABEL
+                if predicted_label == ground_truth[img_id]: nb_correct += 1
+                counter += 1
+        return 1. * nb_correct / counter
 
 # Testing
 
 if __name__ == "__main__":
     catalog_images_paths = glob(constants.CATALOG_IMAGES_PATH)
     query_images_paths = glob(constants.CLASSIFICATION_QUERY_IMAGES_PATH)
+    ground_truth_path = "../Images/classification_data.json"
     clf = Classifier(catalog_images_paths)
+    print(clf.get_best_threshold(query_images_paths, ground_truth_path))
