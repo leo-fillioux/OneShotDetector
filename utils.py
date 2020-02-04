@@ -2,9 +2,17 @@
 # Imports #
 ###########
 
+""" Global """
 import cv2
 import imutils
 import numpy as np
+import PIL.ImageFont as ImageFont
+import PIL.ImageDraw as ImageDraw
+import PIL.ImageColor as ImageColor
+import PIL.Image as Image
+
+""" Local """
+import constants
 
 #############
 # Functions #
@@ -73,3 +81,30 @@ def apply_custom_nms(bboxes, threshold=0.5):
         I = np.delete(I, merge)
 
     return final_bboxes
+
+def draw_text_box_pil(im, text, x, y, rectangle_bgr=(255, 255, 255), size=10, thickness=1):
+    font = ImageFont.truetype('./fonts/Arial.ttf', size)
+    w, h = font.getsize(text)
+    draw = ImageDraw.Draw(im)
+    draw.rectangle((x - 2, y - 2, x + w + 1, y + h + 1), fill=rectangle_bgr)
+    draw.rectangle((x - 2, y - 2, x + w + 1, y + h + 1), outline=(80, 80, 80))
+    draw.text((x, y), text, fill=(0, 0, 0), font=font)
+
+def draw_bboxes(img, bboxes, alpha=0.4):
+    bbox_img = img.copy()
+    labels_set = list(set([bbox["label"] for bbox in bboxes]))
+    for bbox in bboxes:
+        label = bbox["label"]
+        xmin, ymin, xmax, ymax = map(int, bbox["coords"])
+        cv2.rectangle(bbox_img, (xmin, ymin), (xmax, ymax), constants.COLORS[labels_set.index(label) % len(constants.COLORS)], -1)
+        cv2.rectangle(bbox_img, (xmin, ymin), (xmax, ymax), constants.COLORS[labels_set.index(label) % len(constants.COLORS)], 2)
+        cv2.rectangle(img, (xmin, ymin), (xmax, ymax), constants.COLORS[labels_set.index(label) % len(constants.COLORS)], 2)
+    cv2.addWeighted(bbox_img, alpha, img, 1 - alpha, 0, img)
+    image_pil = Image.fromarray(img)
+    for bbox in bboxes:
+        label = bbox["label"]
+        xmin, ymin, xmax, ymax = map(int, bbox["coords"])
+        draw_text_box_pil(image_pil, label, xmin, ymin - 13,
+                          rectangle_bgr=constants.COLORS[labels_set.index(label) % len(constants.COLORS)],
+                          size=10, thickness=2)
+    return np.array(image_pil)

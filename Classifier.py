@@ -3,6 +3,7 @@
 ###########
 
 """ Global """
+import cv2
 import numpy as np
 import nmslib
 from tqdm import tqdm
@@ -57,7 +58,7 @@ class Classifier(object):
 
     def get_catalog_descriptors(self):
         iterator = self.catalog_images_paths
-        if self.verbose: iterator = tqdm(iterator)
+        if self.verbose: iterator = tqdm(iterator, desc="Catalog description")
 
         self.catalog_descriptors = []
         for path in iterator:
@@ -69,8 +70,9 @@ class Classifier(object):
         self.catalog_descriptors = np.array(self.catalog_descriptors)
         self.catalog_descriptors = self.catalog_descriptors.reshape(-1, self.catalog_descriptors.shape[-1])
 
-    def predict_query(self, query_path, score_threshold=None):
-        query_img = utils.read_image(query_path, size=self.image_size)
+    def predict_query(self, query, score_threshold=None):
+        if type(query) == str: query_img = utils.read_image(query, size=self.image_size)
+        else: query_img = cv2.resize(query, (self.image_size, self.image_size))
         query_keypoints = utils.get_keypoints(query_img, self.keypoint_stride, self.keypoint_sizes)
         query_descriptors = utils.get_descriptors(query_img, query_keypoints, self.feature_extractor)
         scores = self.get_query_scores(query_descriptors)
@@ -82,7 +84,7 @@ class Classifier(object):
     
     def predict_query_batch(self, query_paths, score_threshold=None):
         iterator = query_paths
-        if self.verbose: iterator = tqdm(iterator)
+        if self.verbose: iterator = tqdm(iterator, desc="Query prediction")
 
         results = {}
         for query_path in iterator:

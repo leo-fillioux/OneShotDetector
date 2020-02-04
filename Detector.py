@@ -3,15 +3,18 @@
 ###########
 
 """ Global """
+import cv2
 import numpy as np
 import nmslib
 from tqdm import tqdm
 from glob import glob
 import os
 import json
+import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
 
 """ Local """
+from Classifier import Classifier
 import constants
 import utils
 
@@ -61,7 +64,7 @@ class Detector(object):
     
     def get_catalog_data(self, compute_descriptors=True):
         iterator = self.catalog_images_paths
-        if self.verbose: iterator = tqdm(iterator)
+        if self.verbose: iterator = tqdm(iterator, desc="Get catalog data")
         
         self.catalog_data = {
             "keypoints": [],
@@ -69,12 +72,13 @@ class Detector(object):
             "labels": [],
             "shapes": [],
         }
-        for i, catalog_path in enumerate(iterator):
+        for catalog_path in iterator:
             for width in self.catalog_image_widths:
                 img = utils.read_image(catalog_path, width=width)
+                label = catalog_path.split("/")[-1][:-4]
                 keypoints = utils.get_keypoints(img, self.keypoint_stride, self.keypoint_sizes)
                 self.catalog_data["keypoints"] += list(keypoints)
-                self.catalog_data["labels"] += [i] * len(keypoints)
+                self.catalog_data["labels"] += [label] * len(keypoints)
                 self.catalog_data["shapes"] += [img.shape[:2]] * len(keypoints)
                 if compute_descriptors:
                     descriptors = utils.get_descriptors(img, keypoints, self.feature_extractor)
@@ -82,14 +86,16 @@ class Detector(object):
         
         self.catalog_data["descriptors"] = np.array(self.catalog_data["descriptors"])
 
-    def predict_query(self, query_path):
-        query_img = utils.read_image(query_path, width=constants.DEFAULT_DETECTOR_QUERY_IMAGE_WIDTH)
+    def predict_query(self, query_path, classifier=None):
+        query_img = utils.read_image(query_path, width=self.query_image_width)
         query_keypoints = utils.get_keypoints(query_img, self.keypoint_stride, self.keypoint_sizes)
         if self.verbose: print("Query description...")
         query_descriptors = utils.get_descriptors(query_img, query_keypoints, self.feature_extractor)
-        raw_bboxes = self.get_raw_bboxes(query_keypoints, query_descriptors)
-        filtered_bboxes = self.filter_raw_bboxes(raw_bboxes)
-        return filtered_bboxes
+        bboxes = self.get_raw_bboxes(query_keypoints, query_descriptors)
+        bboxes = self.filter_bboxes(bboxes)
+        bboxes = self.merge_bboxes(bboxes, query_img.shape)
+        if classifier is not None: bboxes = self.add_classifier_score(bboxes, query_img, classifier)
+        return bboxes
     
     def get_raw_bboxes(self, query_keypoints, query_descriptors):
         if self.verbose: print("Query matching...")
@@ -97,9 +103,11 @@ class Detector(object):
         trainIdx = np.array([m[0] for m in matches])
         distances = np.array([m[1] for m in matches])
         scores = np.exp(-(distances / self.score_sigma) ** 2)
-        bboxes = {}
+
         iterator = trainIdx
-        if self.verbose: iterator = tqdm(iterator)
+        if self.verbose: iterator = tqdm(iterator, desc="Raw bboxes")
+
+        bboxes = {}
         for ind, trainIds in enumerate(iterator):
             for k, idx in enumerate(trainIds):
                 label = self.catalog_data["labels"][idx]
@@ -110,21 +118,21 @@ class Detector(object):
                 y_center = y_query + (h_catal / 2. - y_catal)
                 bbox = {
                     "score": scores[ind, k],
-                    "feat": np.array([x_center, y_center]),
+                    "feat": np.array([x_center, y_center, h_catal, w_catal]),
                     "raw_coords": np.array([x_query, y_query, x_catal, y_catal, h_catal, w_catal]),
                 }
                 if label in bboxes: bboxes[label].append(bbox)
                 else: bboxes[label] = [bbox]
         return bboxes
 
-    def filter_raw_bboxes(self, bboxes):
+    def filter_bboxes(self, bboxes):
         iterator = bboxes
-        if self.verbose: iterator = tqdm(iterator)
+        if self.verbose: iterator = tqdm(iterator, desc="Filtering bboxes")
         
         filtered_bboxes = {}
         for label in iterator:
             current_bboxes = np.array(bboxes[label])
-            labels = DBSCAN(eps=5, min_samples=2).fit_predict(np.array([bbox["feat"] for bbox in current_bboxes]))
+            labels = DBSCAN(eps=50, min_samples=2).fit_predict(np.array([bbox["feat"] for bbox in current_bboxes]))
             for k in set(labels):
                 if k != -1:
                     coords = [bbox["raw_coords"] for bbox in current_bboxes[labels == k]]
@@ -158,6 +166,40 @@ class Detector(object):
         
         return filtered_bboxes
 
+    def merge_bboxes(self, bboxes, query_shape):
+        iterator = bboxes
+        if self.verbose: iterator = tqdm(iterator, desc="Merging bboxes")
+
+        merged_bboxes = []
+        for label in iterator:
+            for bbox in bboxes[label]:
+                bbox["label"] = label
+                merged_bboxes.append(bbox)
+        
+        merged_bboxes = utils.apply_custom_nms(merged_bboxes, threshold=0.2)
+        for bbox in merged_bboxes:
+            xmin, ymin, xmax, ymax = bbox["coords"]
+            xmin = max(xmin, 0); ymin = max(ymin, 0)
+            xmax = min(xmax, query_shape[1] - 1)
+            ymax = min(ymax, query_shape[0] - 1)
+            bbox["coords"] = [xmin, ymin, xmax, ymax]
+        
+        return merged_bboxes
+
+    def add_classifier_score(self, bboxes, query_img, classifier):
+        iterator = bboxes
+        if self.verbose: iterator = tqdm(iterator, desc="Classifier score")
+
+        for bbox in iterator:
+            xmin, ymin, xmax, ymax = map(int, bbox["coords"])
+            crop_img = query_img[ymin:ymax, xmin:xmax]
+            label, score = classifier.predict_query(crop_img)
+            bbox["score"] = np.sqrt(score * bbox["score"]) if label == bbox["label"] else 0
+        
+        bboxes = list(filter(lambda bbox: bbox["score"] > 0, bboxes))
+        
+        return bboxes
+
 ########
 # Main #
 ########
@@ -166,8 +208,17 @@ if __name__ == "__main__":
     from time import time
     catalog_images_paths = glob(constants.CATALOG_IMAGES_PATH)
     query_images_paths = glob(constants.DETECTOR_QUERY_IMAGES_PATH)
+    query_path = "../Images/Query Raw/JPEGImages/IMG_20190621_161004.jpg" #np.random.choice(query_images_paths)
+
     detector = Detector(catalog_images_paths)
+    classifier = Classifier(catalog_images_paths)
     
     tmp = time()
-    bboxes = detector.predict_query(np.random.choice(query_images_paths))
+    bboxes = detector.predict_query(query_path, classifier=classifier)
     print("Done in {}s".format(time() - tmp))
+    print(query_path, len(bboxes))
+
+    query_img = utils.read_image(query_path, width=detector.query_image_width)
+    boxes_img = utils.draw_bboxes(query_img, bboxes)
+    cv2.imwrite("./tmp.jpg", boxes_img)
+    
