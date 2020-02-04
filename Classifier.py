@@ -78,7 +78,7 @@ class Classifier(object):
 
         results = {}
         for query_path in iterator:
-            results[query_path] = predict_query(query_path, score_threshold=score_threshold)
+            results[query_path] = self.predict_query(query_path, score_threshold=score_threshold)
         
         return results
 
