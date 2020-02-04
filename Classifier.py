@@ -27,11 +27,11 @@ class Classifier(object):
         self.keypoint_sizes = params.get("keypoint_sizes", constants.DEFAULT_CLASSIFIER_KEYPOINT_SIZES)
         self.matcher_index_params = params.get("matcher_index_params", constants.DEFAULT_MATCHER_INDEX_PARAMS)
         self.matcher_query_params = params.get("matcher_query_params", constants.DEFAULT_MATCHER_QUERY_PARAMS)
-        self.verbose = params.get("verbose", constants.VERBOSE)
         self.matcher_path = params.get("matcher_path", constants.DEFAULT_CLASSIFIER_MATCHER_PATH)
         self.force_matcher_compute = params.get("force_matcher_compute", constants.DEFAULT_CLASSIFIER_FORCE_MATCHER_COMPUTE)
         self.k_nn = params.get("k_nn", constants.DEFAULT_CLASSIFIER_K_NN)
         self.score_sigma = params.get("sigma", constants.DEFAULT_CLASSIFIER_SCORE_SIGMA)
+        self.verbose = params.get("verbose", constants.VERBOSE)
     
     def config_matcher(self):
         self.matcher = nmslib.init(method="hnsw", space="l2")
@@ -123,4 +123,5 @@ if __name__ == "__main__":
     query_images_paths = glob(constants.CLASSIFICATION_QUERY_IMAGES_PATH)
     ground_truth_path = "../Images/classification_data.json"
     clf = Classifier(catalog_images_paths)
-    print(clf.get_best_threshold(query_images_paths, ground_truth_path))
+    best_threshold, accuracy = clf.get_best_threshold(query_images_paths, ground_truth_path)
+    print("The best threshold is: {} - For an accuracy of {} %".format(best_threshold, accuracy))
