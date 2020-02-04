@@ -5,6 +5,7 @@ import numpy as np
 import nmslib
 from tqdm import tqdm
 from glob import glob
+import os
 
 """ Local """
 import constants
@@ -16,7 +17,6 @@ class Classifier(object):
     def __init__(self, catalog_images_paths, params={}):
         self.catalog_images_paths = catalog_images_paths
         self.get_params(params)
-        self.get_catalog_descriptors()
         self.config_matcher()
     
     def get_params(self, params):
@@ -27,7 +27,26 @@ class Classifier(object):
         self.matcher_index_params = params.get("matcher_index_params", constants.DEFAULT_MATCHER_INDEX_PARAMS)
         self.matcher_query_params = params.get("matcher_query_params", constants.DEFAULT_MATCHER_QUERY_PARAMS)
         self.verbose = params.get("verbose", constants.VERBOSE)
+        self.matcher_path = params.get("matcher_path", constants.DEFAULT_CLASSIFIER_MATCHER_PATH)
+        self.force_matcher_compute = params.get("force_matcher_compute", constants.DEFAULT_CLASSIFIER_FORCE_MATCHER_COMPUTE)
+        self.k_nn = params.get("k_nn", constants.DEFAULT_CLASSIFIER_K_NN)
+        self.score_sigma = params.get("sigma", constants.DEFAULT_CLASSIFIER_SCORE_SIGMA)
     
+    def config_matcher(self):
+        self.matcher = nmslib.init(method="hnsw", space="l2")
+        if not self.force_matcher_compute and os.path.exists(self.matcher_path):
+            self.matcher.loadIndex(self.matcher_path)
+            if self.verbose:
+                print("Index loaded !")
+        else:
+            self.get_catalog_descriptors()
+            if self.verbose:
+                print("Creating index...")
+            self.matcher.addDataPointBatch(self.catalog_descriptors)
+            self.matcher.createIndex(self.matcher_index_params, print_progress=self.verbose)
+            self.matcher.setQueryTimeParams(self.matcher_query_params)
+            self.matcher.saveIndex(self.matcher_path)
+
     def get_catalog_descriptors(self):
         iterator = self.catalog_images_paths
         if self.verbose: iterator = tqdm(iterator)
@@ -40,20 +59,46 @@ class Classifier(object):
             self.catalog_descriptors.append(descriptors)
         
         self.catalog_descriptors = np.array(self.catalog_descriptors)
-        self.nb_descriptors_per_image = self.catalog_descriptors.shape[1]
         self.catalog_descriptors = self.catalog_descriptors.reshape(-1, self.catalog_descriptors.shape[-1])
+
+    def predict_query(self, query_path, score_threshold=None):
+        query_img = utils.read_image(query_path, size=self.image_size)
+        query_keypoints = utils.get_keypoints(query_img, self.keypoint_stride, self.keypoint_sizes)
+        query_descriptors = utils.get_descriptors(query_img, query_keypoints, self.feature_extractor)
+        scores = self.get_query_scores(query_descriptors)
+        label = sorted(scores.keys(), key=lambda x: -scores[x])[0]
+        label_score = scores[label]
+        if score_threshold is not None and label_score < score_threshold:
+            label = constants.BACKGROUND_LABEL
+        return label, label_score
     
-    def config_matcher(self):
-        if self.verbose:
-            print("Creating index...")
+    def predict_query_batch(self, query_paths, score_threshold=None):
+        iterator = query_paths
+        if self.verbose: iterator = tqdm(iterator)
+
+        results = {}
+        for query_path in iterator:
+            results[query_path] = predict_query(query_path, score_threshold=score_threshold)
         
-        self.matcher_index = nmslib.init(method="hnsw", space="l2")
-        self.matcher_index.addDataPointBatch(self.catalog_descriptors)
-        self.matcher_index.createIndex(self.matcher_index_params, print_progress=self.verbose)
-        self.matcher_index.setQueryTimeParams(self.matcher_query_params)
+        return results
+
+    def get_query_scores(self, query_descriptors):
+        matches = self.matcher.knnQueryBatch(query_descriptors, k=self.k_nn)
+        trainIdx = np.array([m[0] for m in matches])
+        distances = np.array([m[1] for m in matches])
+        scores_matrix = np.exp(-(distances / self.score_sigma) ** 2)
+        scores = {}
+        for ind, nn_trainIdx in enumerate(trainIdx):
+            for k, idx in enumerate(nn_trainIdx):
+                catalog_path = self.catalog_images_paths[idx // query_descriptors.shape[0]]
+                scores[catalog_path] = scores.get(catalog_path, 0) + scores_matrix[ind, k]
+        return scores
+
+
 
 # Testing
 
 if __name__ == "__main__":
     catalog_images_paths = glob(constants.CATALOG_IMAGES_PATH)
+    query_images_paths = glob(constants.CLASSIFICATION_QUERY_IMAGES_PATH)
     clf = Classifier(catalog_images_paths)

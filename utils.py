@@ -10,7 +10,7 @@ def read_image(path, width=None, size=None):
     if width is not None:
         img = imutils.resize(img, width=width)
     elif size is not None:
-        img = imutils.resize(img, width=size, height=size)
+        img = cv2.resize(img, (size, size))
     return img
 
 def get_keypoints(img, kpt_stride, kpt_sizes):
