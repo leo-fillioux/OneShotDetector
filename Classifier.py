@@ -1,4 +1,6 @@
-# Imports
+###########
+# Imports #
+###########
 
 """ Global """
 import numpy as np
@@ -12,7 +14,9 @@ import json
 import constants
 import utils
 
-# Classifier
+##############
+# Classifier #
+##############
 
 class Classifier(object):
     def __init__(self, catalog_images_paths, params={}):
@@ -36,17 +40,20 @@ class Classifier(object):
     def config_matcher(self):
         self.matcher = nmslib.init(method="hnsw", space="l2")
         if not self.force_matcher_compute and os.path.exists(self.matcher_path):
+            if self.verbose: print("Loading index...")
             self.matcher.loadIndex(self.matcher_path)
-            if self.verbose:
-                print("Index loaded !")
+            if self.verbose: print("Index loaded !")
         else:
             self.get_catalog_descriptors()
-            if self.verbose:
-                print("Creating index...")
+            if self.verbose: print("Creating index...")
             self.matcher.addDataPointBatch(self.catalog_descriptors)
             self.matcher.createIndex(self.matcher_index_params, print_progress=self.verbose)
             self.matcher.setQueryTimeParams(self.matcher_query_params)
+            if self.verbose: print("Index created !")
+
+            if self.verbose: print("Saving index...")
             self.matcher.saveIndex(self.matcher_path)
+            if self.verbose: print("Index saved !")
 
     def get_catalog_descriptors(self):
         iterator = self.catalog_images_paths
@@ -116,7 +123,9 @@ class Classifier(object):
                 counter += 1
         return 1. * nb_correct / counter
 
-# Testing
+########
+# Main #
+########
 
 if __name__ == "__main__":
     catalog_images_paths = glob(constants.CATALOG_IMAGES_PATH)

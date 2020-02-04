@@ -1,8 +1,12 @@
-# Imports
+###########
+# Imports #
+###########
 
 import cv2
 
-# Constants
+#############
+# Constants #
+#############
 
 # <-- FEATURE EXTRACTOR --> #
 DEFAULT_FEATURE_EXTRACTOR = cv2.xfeatures2d.SURF_create(extended=True)
@@ -29,6 +33,7 @@ DEFAULT_DETECTOR_MATCHER_PATH = "./matchers/detector.hnsw"
 DEFAULT_DETECTOR_FORCE_MATCHER_COMPUTE = False
 DEFAULT_DETECTOR_K_NN = 1
 DEFAULT_DETECTOR_SCORE_SIGMA = 0.2
+DEFAULT_DETECTOR_N_RANSAC = 20
 
 # <-- OTHER --> #
 CATALOG_IMAGES_PATH = "../Images/Catalog/*"
