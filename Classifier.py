@@ -71,7 +71,7 @@ class Classifier(object):
         self.catalog_descriptors = self.catalog_descriptors.reshape(-1, self.catalog_descriptors.shape[-1])
 
     def predict_query(self, query, score_threshold=None):
-        if type(query) == str: query_img = utils.read_image(query, size=self.image_size)
+        if type(query) in [str, np.string_]: query_img = utils.read_image(query, size=self.image_size)
         else: query_img = cv2.resize(query, (self.image_size, self.image_size))
         query_keypoints = utils.get_keypoints(query_img, self.keypoint_stride, self.keypoint_sizes)
         query_descriptors = utils.get_descriptors(query_img, query_keypoints, self.feature_extractor)
