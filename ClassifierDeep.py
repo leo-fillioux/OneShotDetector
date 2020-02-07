@@ -50,8 +50,8 @@ class ClassifierDeep(object):
     def get_model(self):
         # def loss_function(y_true, y_pred): return utils.batch_all_triplet_loss(y_true, y_pred, self.margin)[0]
         # def metric_function(y_true, y_pred): return utils.batch_all_triplet_loss(y_true, y_pred, self.margin)[1]
-        vgg16 = keras.applications.VGG16(include_top=False)
-        self.model = keras.models.Model(vgg16.input, vgg16.get_layer(name="block3_conv3").output)
+        resnet = keras.applications.ResNet50(include_top=False)
+        self.model = keras.models.Model(resnet.input, resnet.output)
         # model_input = keras.layers.Input(shape=(self.image_size, self.image_size, 3))
         # encoder = keras.layers.GlobalMaxPool2D()(vgg16(model_input))
         # model_output = keras.layers.Lambda(lambda x: keras.backend.l2_normalize(x, axis=-1))(encoder)

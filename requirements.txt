@@ -6,6 +6,7 @@ scikit-learn
 Pillow
 imgaug
 imutils
+easydict
 keras==2.2.4
 tensorflow==1.6
 numpy==1.15.4

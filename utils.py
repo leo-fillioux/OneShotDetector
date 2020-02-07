@@ -7,6 +7,7 @@ import cv2
 import imutils
 import numpy as np
 import tensorflow as tf
+from easydict import EasyDict as edict
 import PIL.ImageFont as ImageFont
 import PIL.ImageDraw as ImageDraw
 import PIL.ImageColor as ImageColor
@@ -34,6 +35,12 @@ def get_keypoints(img, kpt_stride, kpt_sizes):
         for x in range(0, img.shape[1], kpt_stride)
         for y in range(0, img.shape[0], kpt_stride)
     ]
+
+def keypoint2data(keypoint):
+    data = edict({})
+    data.query_pt = np.array(keypoint.pt)
+    data.size = keypoint.size
+    return data
 
 def get_descriptors(img, keypoints, feature_extractor):
     _, descriptors = feature_extractor.compute(img, keypoints)
@@ -109,6 +116,72 @@ def draw_bboxes(img, bboxes, alpha=0.4):
                           rectangle_bgr=constants.COLORS[labels_set.index(label) % len(constants.COLORS)],
                           size=10, thickness=2)
     return np.array(image_pil)
+
+def find_bbox_from_keypoints(keypoints):
+    # Get coords
+    query_coords = np.array([kpt.query_pt for kpt in keypoints])
+    query_shapes = np.array([kpt.query_shape for kpt in keypoints])[:, ::-1]
+
+    # Get shapes
+    catalog_coords = np.array([kpt.catalog_pt for kpt in keypoints])
+    catalog_shapes = np.array([kpt.catalog_shape for kpt in keypoints])[:, ::-1]
+
+    # Put the center in the middle
+    query_coords = query_coords - query_shapes / 2.
+    catalog_coords = catalog_coords - catalog_shapes / 2.
+
+    # Find homography
+    H, _ = cv2.findHomography(catalog_coords, query_coords, cv2.RANSAC)
+    if H is None:
+        return None
+    
+    # Get catalog bbox coords
+    catalog_bbox_coords1 = np.ones((len(catalog_coords), 3))
+    catalog_bbox_coords2 = np.ones((len(catalog_coords), 3))
+    catalog_bbox_coords3 = np.ones((len(catalog_coords), 3))
+    catalog_bbox_coords4 = np.ones((len(catalog_coords), 3))
+    catalog_bbox_coords1[:, 0] = -0.5 * catalog_shapes[:, 0]
+    catalog_bbox_coords1[:, 1] = -0.5 * catalog_shapes[:, 1]
+    catalog_bbox_coords2[:, 0] = +0.5 * catalog_shapes[:, 0]
+    catalog_bbox_coords2[:, 1] = -0.5 * catalog_shapes[:, 1]
+    catalog_bbox_coords3[:, 0] = -0.5 * catalog_shapes[:, 0]
+    catalog_bbox_coords3[:, 1] = +0.5 * catalog_shapes[:, 1]
+    catalog_bbox_coords4[:, 0] = +0.5 * catalog_shapes[:, 0]
+    catalog_bbox_coords4[:, 1] = +0.5 * catalog_shapes[:, 1]
+
+    # Get query bbox coords
+    query_bbox_coords1 = (H.dot(catalog_bbox_coords1.T)).T
+    query_bbox_coords2 = (H.dot(catalog_bbox_coords2.T)).T
+    query_bbox_coords3 = (H.dot(catalog_bbox_coords3.T)).T
+    query_bbox_coords4 = (H.dot(catalog_bbox_coords4.T)).T
+    
+    # Divide by last coord
+    query_bbox_coords1 = 1. * query_bbox_coords1 / query_bbox_coords1[:, [-1]]
+    query_bbox_coords2 = 1. * query_bbox_coords2 / query_bbox_coords2[:, [-1]]
+    query_bbox_coords3 = 1. * query_bbox_coords3 / query_bbox_coords3[:, [-1]]
+    query_bbox_coords4 = 1. * query_bbox_coords4 / query_bbox_coords4[:, [-1]]
+
+    # Get mean
+    query_bbox_coords1 = np.mean(query_bbox_coords1, axis=0)
+    query_bbox_coords2 = np.mean(query_bbox_coords2, axis=0)
+    query_bbox_coords3 = np.mean(query_bbox_coords3, axis=0)
+    query_bbox_coords4 = np.mean(query_bbox_coords4, axis=0)
+
+    # Get bbox coords
+    xmin = int(min(query_bbox_coords1[0], query_bbox_coords2[0], query_bbox_coords3[0], query_bbox_coords4[0]) + query_shapes[0, 0] / 2.)
+    xmax = int(max(query_bbox_coords1[0], query_bbox_coords2[0], query_bbox_coords3[0], query_bbox_coords4[0]) + query_shapes[0, 0] / 2.)
+    ymin = int(min(query_bbox_coords1[1], query_bbox_coords2[1], query_bbox_coords3[1], query_bbox_coords4[1]) + query_shapes[0, 1] / 2.)
+    ymax = int(max(query_bbox_coords1[1], query_bbox_coords2[1], query_bbox_coords3[1], query_bbox_coords4[1]) + query_shapes[0, 1] / 2.)
+    if xmin >= xmax or ymin >= ymax:
+        return None
+    
+    # Get bbox
+    bbox = edict({
+        "score": np.sum([kpt.score for kpt in keypoints]),
+        "coords": np.array([xmin, ymin, xmax, ymax])
+    })
+
+    return bbox
 
 def _pairwise_distances(embeddings):
     dot_product = tf.matmul(embeddings, tf.transpose(embeddings))

@@ -132,6 +132,7 @@ class Classifier(object):
 if __name__ == "__main__":
     catalog_images_paths = glob(constants.CATALOG_IMAGES_PATH)
     query_images_paths = glob(constants.CLASSIFICATION_QUERY_IMAGES_PATH)
+    # query_images_paths = np.random.choice(query_images_paths, size=200)
     ground_truth_path = "../Images/classification_data.json"
     clf = Classifier(catalog_images_paths)
     best_threshold, accuracy = clf.get_best_threshold(query_images_paths, ground_truth_path)
